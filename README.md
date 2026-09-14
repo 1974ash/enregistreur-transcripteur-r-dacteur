@@ -38,3 +38,8 @@ Streamlit - UI framework
 Faster-Whisper - Local speech-to-text
 Ollama - Local LLM for summarization
 FFmpeg - Media format conversion
+
+To launch this app :
+In one terminal type : ollama serve 
+In a second one type :  streamlit run app.py 
+You'll see the app in this local website : http://localhost:8501
