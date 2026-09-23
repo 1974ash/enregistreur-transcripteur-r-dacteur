@@ -44,10 +44,3 @@ In one terminal type : ollama serve
 In a second one type :  streamlit run app.py 
 You'll see the app in this local website : http://localhost:8501
 
-J'espère que ça va passer cette fois!
-
-https://francetransfert.numerique.gouv.fr/download/download-info-public?enclosure=952325f6-a599-4ed3-b10a-513b9696b290&lang=fr-FR
-
-Voici le mot de passe associé à votre pli :
-iG)n59rh!3OZH%po&
-
