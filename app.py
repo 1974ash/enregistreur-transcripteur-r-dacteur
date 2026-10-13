@@ -13,14 +13,14 @@ from streamlit_mic_recorder import mic_recorder
 # Configuration (peuvent être surchargées par variables d'environnement)
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
 DEFAULT_OLLAMA_MODEL = os.getenv("DEFAULT_OLLAMA_MODEL", "qwen2.5:3b")
-OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "1800"))  # secondes
+OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "3600"))  # secondes
 
 # Logger
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Streamlit page
-st.set_page_config(page_title="Transcripteur IA local", page_icon="🎙", layout="wide")
+st.set_page_config(page_title="Transcripteur local", page_icon="🎙", layout="wide")
 
 # ---------- Utils ----------
 def get_file_extension(filename: str) -> str:
@@ -120,7 +120,8 @@ def segments_to_srt(segments: List[Dict]) -> str:
 
 # ---------- Ollama ----------
 def ask_ollama(prompt: str, model_name: str, temperature: float = 0.2, timeout: int = OLLAMA_TIMEOUT) -> str:
-    payload = {"model": model_name, "prompt": prompt, "stream": False, "options": {"temperature": temperature}}
+    payload = {"model": model_name, "prompt": prompt, "stream": False, "options": {"temperature": temperature,"num_predict": 400,   # à ajuster: 400-1200
+                                                                                   }}
     headers = {"Content-Type": "application/json"}
     try:
         response = requests.post(OLLAMA_URL, json=payload, headers=headers, timeout=timeout)
@@ -137,7 +138,7 @@ def ask_ollama(prompt: str, model_name: str, temperature: float = 0.2, timeout: 
         raise RuntimeError("Réponse inattendue d'Ollama :\n" + str(data))
     return data["response"].strip()
 
-def split_text(text: str, max_characters: int = 12000) -> List[str]:
+def split_text(text: str, max_characters: int = 2500) -> List[str]:
     text = text.strip()
     if len(text) <= max_characters:
         return [text]
@@ -161,21 +162,28 @@ def split_text(text: str, max_characters: int = 12000) -> List[str]:
 
 def generate_summary(transcript: str, model_name: str, summary_type: str) -> str:
     chunks = split_text(transcript)
+    MAX_CHUNKS = 6
+    chunks = chunks[:MAX_CHUNKS]
+
     if summary_type == "Résumé court":
         instruction = (
-            "Rédige un résumé court et clair en français. Conserve uniquement les informations importantes. "
+            
+            "Rédige un résumé court et clair entre 80 et 160 mots en français. Conserve uniquement les informations importantes et le nom des intervenants. "
             "Ne fais pas de liste d'actions si elles ne sont pas explicitement mentionnées. N'invente aucune information."
         )
     elif summary_type == "Compte rendu détaillé":
         instruction = (
-            "Rédige un compte rendu détaillé en français avec les sections : Compte rendu, Sujet principal, Synthèse, "
+ #           "Rédige d'abord un résumé de la transcription entre 80 et 160 mots en le mettant dans la section Résumé de la transcription et en indiquant le nom des personnes qui ont parlé si tu le peux"
+            "Rédige ensuite un compte rendu détaillé entre 80 et 160 mots en français avec les sections : Compte rendu (un texte entre 70 et 130 mots), Sujet principal, Synthèse, "
             "Points importants, Décisions prises, Actions à réaliser (responsable/échéance si présents), Questions/points à clarifier. "
             "N'invente aucune information ; écris 'Non précisé' si absent."
         )
     else:
         instruction = (
+            "Rédige d'abord un résumé de la transcription entre 80 et 160 mots en le mettant dans la section Résumé de la transcription et en indiquant le nom des personnes qui ont parlé si tu le peux"
             "Analyse cette transcription et produis une synthèse structurée en français identifiant le sujet principal, "
             "les idées importantes, décisions, actions, personnes citées, dates citées et points non résolus. N'invente rien."
+            "Rédige un résumé de la transcription en proposant un texte entre 5 à 10 lignes type word arial 11 sous la dernière section s'intitulant Résumé de la transcription."
         )
 
     partial_results = []
@@ -195,9 +203,11 @@ def generate_summary(transcript: str, model_name: str, summary_type: str) -> str
     final_prompt = (
         "Tu es un assistant chargé de fusionner plusieurs analyses d'une même transcription. Fusionne les éléments ci-dessous "
         "en un document cohérent en français. Supprime les répétitions. Ne crée aucune information qui n'existe pas dans les analyses.\n\n"
+        "Rédige d'abord un résumé de la transcription entre 80 et 160 mots en le mettant dans la section Résumé de la transcription \n\n"
         "Utilise les sections : Compte rendu final, Sujet principal, Synthèse, Points importants, Décisions prises, Actions à réaliser, Questions ou points à clarifier.\n\n"
         "Analyses à fusionner :\n" + combined
     )
+    st.info(f"Chunks = {len(chunks)} | len(transcript) = {len(transcript)}")
     return ask_ollama(prompt=final_prompt, model_name=model_name, temperature=0.2)
 
 def build_markdown_export(transcript: str, summary: str, detected_language: str) -> str:
@@ -211,7 +221,7 @@ def build_markdown_export(transcript: str, summary: str, detected_language: str)
     )
 
 # ---------- UI ----------
-st.title("🎙️ Transcripteur audio/vidéo avec IA")
+st.title("🎙️ Transcripteur audio/vidéo avec OLLAMA")
 st.caption("Whisper transcrit localement et Ollama génère le résumé ou le compte rendu.")
 
 with st.sidebar:
@@ -317,9 +327,19 @@ if process_button and not st.session_state["processing"]:
 
             status.write(f"Langue détectée : {transcription_result.get('language')}")
             status.write(f"Analyse avec Ollama ({ollama_model})...")
+            with st.spinner("Pré-chargement du modèle Ollama..."):
+                try:
+                    _ = ask_ollama(
+                        prompt="Bonjour. Donne juste 'OK'.",
+                        model_name=ollama_model,
+                        temperature=0.0,
+                        timeout=OLLAMA_TIMEOUT,
+                    )
+                except Exception as e:
+                    logger.warning("Pré-chargement Ollama a échoué: %s", e)
 
             summary = generate_summary(
-                transcript=transcript_with_timestamps,
+                transcript=transcription_result["text"],
                 model_name=ollama_model,
                 summary_type=summary_type,
             )
